@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>To Do</title>
+
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#1c1c1e">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="To Do">
+
+<style>
+  :root {
+    --ink: #1c1c1e;
+    --muted: #6e6e73;
+    --faint: #a1a1a6;
+    --line: #e3e3e6;
+    --paper: #ffffff;
+    --field: #f5f5f7;
+    --link: #0a58c2;
+    --danger: #b3261e;
+  }
+
+  * { box-sizing: border-box; }
+  html { height: 100%; -webkit-text-size-adjust: 100%; }
+
+  /* The app shell. The page itself never scrolls — only the task list does,
+     which keeps the input and the menu reachable however long the list is. */
+  body {
+    margin: 0;
+    height: 100dvh;
+    display: flex;
+    justify-content: center;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 17px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+    overscroll-behavior: none;
+  }
+
+  main {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 32rem;
+    height: 100%;
+    padding: 1.25rem 1.25rem 0;
+  }
+
+  .head { flex: none; display: flex; align-items: baseline;
+          justify-content: space-between; gap: 1rem; padding-bottom: 0.75rem; }
+  .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto;
+            -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  .dock { position: relative; flex: none;
+          padding: 0.75rem 0 calc(0.75rem + env(safe-area-inset-bottom)); }
+
+  h1 { margin: 0; font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em; }
+  .status { color: var(--faint); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+
+  /* ---- controls ---- */
+
+  button { font: inherit; color: inherit; background: none; border: none;
+           cursor: pointer; }
+  button[disabled] { opacity: 0.35; cursor: default; }
+
+  input[type="text"], input[type="search"] {
+    width: 100%; min-width: 0; height: 40px; padding: 0 0.75rem;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--field); color: inherit; font: inherit;
+    -webkit-appearance: none; appearance: none;
+  }
+
+  input:focus-visible, button:focus-visible, a:focus-visible {
+    outline: 2px solid var(--ink); outline-offset: 2px;
+  }
+
+  .compose { display: flex; gap: 0.5rem; }
+  .compose button {
+    flex: none; width: 40px; height: 40px; border-radius: 8px;
+    background: var(--ink); color: var(--paper); font-size: 1.375rem; line-height: 1;
+  }
+
+  /* Small, quiet, and spaced out — reachable but hard to hit by accident. */
+  .menu { display: flex; flex-wrap: wrap; gap: 0.375rem 1.125rem; margin-top: 0.875rem; }
+  .menu button { padding: 0.25rem 0; color: var(--muted); font-size: 0.8125rem; }
+  .menu button:hover { color: var(--ink); }
+  .menu .hint { color: var(--faint); font-size: 0.8125rem; padding: 0.25rem 0; }
+  .menu .strong { color: var(--ink); font-weight: 500; }
+
+  /* ---- task rows ---- */
+
+  ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+
+  li { display: flex; align-items: flex-start; gap: 0.5rem;
+       padding: 0.375rem 0; border-bottom: 1px solid var(--line); }
+
+  li.pending { opacity: 0.45; }
+
+  input[type="checkbox"] {
+    flex: none; width: 21px; height: 21px; margin: 0.625rem 0 0 0.125rem;
+    accent-color: var(--ink); cursor: pointer;
+  }
+
+  .text { flex: 1; min-width: 0; padding: 0.5rem 0; overflow-wrap: anywhere; }
+  li.done .text { color: var(--faint); text-decoration: line-through; }
+
+  .text a { color: var(--link); }
+  li.done .text a { color: var(--faint); }
+  .text .inert { color: var(--muted); } /* a link, not clickable right now */
+
+  .text-edit { flex: 1; min-width: 0; height: 38px; margin: 0.25rem 0;
+               padding: 0 0.5rem; border: 1px solid var(--ink);
+               border-radius: 6px; background: var(--paper); font: inherit; }
+
+  .act {
+    flex: none; width: 44px; height: 44px; display: grid; place-items: center;
+    border-radius: 8px; color: var(--faint);
+    touch-action: manipulation; -webkit-touch-callout: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  .act:hover { color: var(--ink); }
+  .act.danger:hover { color: var(--danger); }
+  .act svg { width: 18px; height: 18px; pointer-events: none; }
+  .act.void { pointer-events: none; opacity: 0; } /* keeps the row aligned */
+
+  .stamp { display: block; margin-top: 0.125rem; color: var(--faint); font-size: 0.75rem; }
+
+  /* ---- notices ---- */
+
+  .note { padding: 2.5rem 0.25rem; color: var(--muted); text-align: center; }
+
+  .error { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
+           padding: 0.625rem 0.875rem; border: 1px solid var(--danger);
+           border-radius: 8px; color: var(--danger); font-size: 0.875rem; }
+  .error p { margin: 0; flex: 1; }
+  .error button { color: inherit; font-weight: 500; text-decoration: underline; }
+
+  .toast { position: absolute; left: 0; right: 0; bottom: calc(100% - 0.25rem);
+           display: flex; align-items: center; gap: 1rem;
+           padding: 0.625rem 0.875rem; border-radius: 8px;
+           background: var(--ink); color: var(--paper); font-size: 0.875rem;
+           box-shadow: 0 2px 12px rgba(0,0,0,0.2); }
+  .toast p { margin: 0; flex: 1; overflow: hidden; text-overflow: ellipsis;
+             white-space: nowrap; }
+  .toast button { color: inherit; font-weight: 600; text-decoration: underline;
+                  padding: 0.25rem 0; }
+
+  .hidden { display: none !important; }
+
+  /* ---- first run ---- */
+
+  .setup { padding-top: 0.5rem; }
+  .setup p { color: var(--muted); font-size: 0.9375rem; }
+  .setup label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+  .setup input { margin-bottom: 0.75rem; }
+  .setup .go { height: 40px; padding: 0 1.25rem; border-radius: 8px;
+               background: var(--ink); color: var(--paper); font-weight: 500; }
+  .setup code { font-size: 0.875rem; background: var(--field);
+                padding: 0.1em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .act, .menu button { transition: color 0.15s; }
+  }
+</style>
+</head>
+
+<body>
+<main>
+
+  <!-- Shown only until an endpoint URL has been saved on this device. -->
+  <section id="setup" class="setup hidden">
+    <h1>To Do</h1>
+    <p>This device needs to know where your tasks live. Paste the web app URL
+       from your Apps Script deployment — it ends in <code>/exec</code>.</p>
+    <label for="url-input">Apps Script web app URL</label>
+    <input id="url-input" type="text" inputmode="url" autocomplete="off" spellcheck="false">
+    <button id="url-save" class="go">Connect</button>
+    <p id="setup-error" class="hidden" style="color: var(--danger)"></p>
+  </section>
+
+  <!-- The app. -->
+  <div id="app" class="hidden" style="display:contents">
+
+    <header class="head">
+      <h1 id="title">To Do</h1>
+      <span id="status" class="status"></span>
+    </header>
+
+    <div class="scroll">
+      <div id="error" class="error hidden">
+        <p id="error-text"></p>
+        <button id="retry">Retry</button>
+      </div>
+      <p id="note" class="note hidden"></p>
+      <ul id="list"></ul>
+    </div>
+
+    <div class="dock">
+
+      <!-- normal mode -->
+      <div id="dock-list">
+        <div class="compose">
+          <input id="new-task" type="text" maxlength="500" autocomplete="off"
+                 enterkeyhint="done" aria-label="New task">
+          <button id="add" aria-label="Add task">+</button>
+        </div>
+        <nav class="menu">
+          <button id="reorder-on">Reorder</button>
+          <button id="archive-done" class="strong hidden"></button>
+          <button id="go-archive">View archive</button>
+          <button id="refresh">Refresh</button>
+          <button id="reset">Change URL</button>
+        </nav>
+      </div>
+
+      <!-- reorder mode -->
+      <div id="dock-reorder" class="hidden">
+        <nav class="menu">
+          <span class="hint">Tap an arrow to move one step. Hold to send to the top or bottom.</span>
+        </nav>
+        <nav class="menu">
+          <button id="reorder-off" class="strong">Done</button>
+        </nav>
+      </div>
+
+      <!-- archive screen -->
+      <div id="dock-archive" class="hidden">
+        <input id="search" type="search" placeholder="Search" autocomplete="off"
+               aria-label="Search the archive">
+        <nav class="menu">
+          <button id="go-list" class="strong">Back to list</button>
+          <button id="refresh-archive">Refresh</button>
+        </nav>
+      </div>
+
+      <div id="toast" class="toast hidden">
+        <p id="toast-text"></p>
+        <button id="undo">Undo</button>
+      </div>
+
+    </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================================================================
+   * Where the data lives
+   *
+   * The endpoint URL is NOT written into this file. You type it into the
+   * page once per device and the browser remembers it. That keeps it out
+   * of your public GitHub repo, and means you can share this code with
+   * someone else without editing anything.
+   * ================================================================ */
+
+  var STORAGE_KEY = 'todo.endpoint';
+  var TIMEOUT_MS = 20000;
+  var HOLD_MS = 500;      // long press on an arrow: send to top or bottom
+  var UNDO_MS = 6000;     // how long a change stays undoable
+
+  var endpoint = localStorage.getItem(STORAGE_KEY) || '';
+
+  var view = 'list';      // 'list' or 'archive'
+  var mode = 'normal';    // 'normal' or 'reorder'
+  var tasks = [];         // the live list
+  var archive = [];       // loaded only when the archive screen is opened
+  var query = '';
+  var editing = false;
+  var orderDirty = false; // arrows moved things but the server hasn't been told
+  var sending = 0;
+  var pending = null;     // an undoable change waiting to be sent
+
+  var $ = function (id) { return document.getElementById(id); };
+
+
+  /* ================================================================
+   * Talking to Apps Script
+   * ================================================================ */
+
+  /**
+   * One function for every server call.
+   *
+   * Reads are GET. Writes are POST with ordinary form fields, which
+   * matters: form encoding is one of the content types a browser is
+   * allowed to send to another site without asking permission first.
+   * Apps Script cannot answer that permission request, so anything
+   * fancier (JSON bodies, custom headers) fails before it is sent.
+   *
+   * Apps Script also replies with a redirect to googleusercontent.com
+   * rather than answering directly. fetch follows that on its own, but
+   * only in its normal mode — never set mode:'no-cors'.
+   */
+  function api(fields, wantArchive) {
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, TIMEOUT_MS);
+
+    var url = endpoint + (wantArchive && !fields ? '?view=archive' : '');
+    var options = { signal: controller.signal };
+
+    if (fields) {
+      var body = Object.assign({}, fields);
+      if (wantArchive) body.view = 'archive';
+      options.method = 'POST';
+      options.body = new URLSearchParams(body);
+    }
+
+    return fetch(url, options)
+      .then(function (res) {
+        if (!res.ok) throw new Error('Server replied ' + res.status + '.');
+        return res.json();
+      })
+      .catch(function (err) {
+        if (err.name === 'AbortError') throw new Error('The server took too long to answer.');
+        if (err.name === 'SyntaxError') throw new Error('That URL did not return task data. Check it ends in /exec and is deployed so that "Anyone" can access it.');
+        if (err.name === 'TypeError') throw new Error('Could not reach the server. Check your connection and the URL.');
+        throw err;
+      })
+      .then(function (data) {
+        if (!data || !data.ok) throw new Error((data && data.error) || 'The server reported a problem.');
+        return data.tasks || [];
+      })
+      .finally(function () { clearTimeout(timer); });
+  }
+
+
+  /* ================================================================
+   * Turning URLs in task text into links
+   *
+   * The text is built out of real text nodes and real <a> elements, one
+   * piece at a time. Nothing ever goes near innerHTML, so a task that
+   * happens to contain angle brackets stays harmless text.
+   * ================================================================ */
+
+  var URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>()]+[^\s<>().,;:!?'"]/gi;
+
+  function writeText(parent, text, clickable) {
+    var cursor = 0, match;
+    URL_RE.lastIndex = 0;
+
+    while ((match = URL_RE.exec(text)) !== null) {
+      if (match.index > cursor) {
+        parent.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+      }
+      var found = match[0];
+      var node;
+
+      if (clickable) {
+        node = document.createElement('a');
+        // Forcing the scheme also rules out anything like javascript:
+        node.href = /^https?:\/\//i.test(found) ? found : 'https://' + found;
+        node.target = '_blank';
+        node.rel = 'noopener noreferrer';
+      } else {
+        node = document.createElement('span');
+        node.className = 'inert';
+      }
+      node.textContent = found;
+      parent.appendChild(node);
+      cursor = match.index + found.length;
+    }
+
+    if (cursor < text.length) {
+      parent.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+  }
+
+
+  /* ================================================================
+   * Drawing
+   * ================================================================ */
+
+  var ICON = {
+    edit: 'M4 13.5V16h2.5l7.4-7.4-2.5-2.5L4 13.5zm11.8-6.9a.7.7 0 0 0 0-1L14.4 4.2a.7.7 0 0 0-1 0l-1.2 1.2 2.5 2.5 1.1-1.3z',
+    remove: 'M5 5l10 10M15 5L5 15',
+    up: 'M10 15V5M5 10l5-5 5 5',
+    down: 'M10 5v10M5 10l5 5 5-5',
+    restore: 'M8 5L4 9l4 4M4 9h7a5 5 0 0 1 0 10H8'
+  };
+
+  function render() {
+    if (view === 'archive') { renderArchive(); } else { renderList(); }
+  }
+
+  function renderList() {
+    var list = $('list');
+    list.textContent = '';
+
+    var left = tasks.filter(function (t) { return !t.completed; }).length;
+    var done = tasks.filter(function (t) { return t.completed; }).length;
+
+    $('title').textContent = 'To Do';
+    $('status').textContent = mode === 'reorder'
+      ? 'Reordering'
+      : (tasks.length ? left + ' of ' + tasks.length + ' left' : '');
+
+    $('dock-list').classList.toggle('hidden', mode === 'reorder');
+    $('dock-reorder').classList.toggle('hidden', mode !== 'reorder');
+    $('dock-archive').classList.add('hidden');
+
+    var archiveBtn = $('archive-done');
+    archiveBtn.textContent = 'Archive done (' + done + ')';
+    archiveBtn.classList.toggle('hidden', done === 0 || mode === 'reorder');
+
+    showNote(tasks.length ? '' : 'Nothing here yet. Add your first task below.');
+
+    tasks.forEach(function (task, index) {
+      list.appendChild(taskRow(task, index));
+    });
+  }
+
+  function taskRow(task, index) {
+    var li = document.createElement('li');
+    li.className = (task.completed ? 'done ' : '') + (task.pending ? 'pending' : '');
+
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = task.completed;
+    box.setAttribute('aria-label', 'Mark "' + task.task + '" complete');
+    box.onchange = function () { toggle(task, box.checked); };
+    li.appendChild(box);
+
+    var text = document.createElement('span');
+    text.className = 'text';
+    // In reorder mode links are shown but not clickable, so a mis-tap while
+    // rearranging cannot navigate away.
+    writeText(text, task.task, mode !== 'reorder');
+    li.appendChild(text);
+
+    if (mode === 'reorder') {
+      // The arrows take the exact slots the pencil and cross vacate, so
+      // switching modes does not reflow the row.
+      li.appendChild(index === 0
+        ? spacer()
+        : moveButton('Move up', ICON.up, index, -1, 'top'));
+      li.appendChild(index === tasks.length - 1
+        ? spacer()
+        : moveButton('Move down', ICON.down, index, 1, 'bottom'));
+    } else {
+      li.appendChild(actionButton('Edit', ICON.edit, function () {
+        beginEdit(li, text, task);
+      }));
+      li.appendChild(actionButton('Delete', ICON.remove, function () {
+        remove(task);
+      }, true));
+    }
+
+    return li;
+  }
+
+  function renderArchive() {
+    var list = $('list');
+    list.textContent = '';
+
+    var shown = archive.filter(function (t) {
+      return !query || t.task.toLowerCase().indexOf(query) !== -1;
+    });
+
+    $('title').textContent = 'Archive';
+    $('status').textContent = archive.length
+      ? (query ? shown.length + ' of ' + archive.length : archive.length + ' items')
+      : '';
+
+    $('dock-list').classList.add('hidden');
+    $('dock-reorder').classList.add('hidden');
+    $('dock-archive').classList.remove('hidden');
+
+    showNote(archive.length
+      ? (shown.length ? '' : 'Nothing matches that.')
+      : 'Nothing archived yet. Finish some tasks, then tap "Archive done".');
+
+    shown.forEach(function (task) {
+      var li = document.createElement('li');
+      li.className = task.pending ? 'pending' : '';
+
+      var text = document.createElement('span');
+      text.className = 'text';
+      writeText(text, task.task, true);
+
+      var when = document.createElement('span');
+      when.className = 'stamp';
+      when.textContent = shortDate(task.updated);
+      text.appendChild(when);
+
+      li.appendChild(text);
+      li.appendChild(actionButton('Restore to list', ICON.restore, function () {
+        restore(task);
+      }));
+      li.appendChild(actionButton('Delete for good', ICON.remove, function () {
+        remove(task);
+      }, true));
+
+      list.appendChild(li);
+    });
+  }
+
+  function actionButton(label, path, onclick, danger) {
+    var b = document.createElement('button');
+    b.className = 'act' + (danger ? ' danger' : '');
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.onclick = onclick;
+    b.appendChild(icon(path));
+    return b;
+  }
+
+  /**
+   * An arrow. A tap moves one step; holding it for half a second sends the
+   * task all the way to the end. Holding also has to suppress two things
+   * the browser would otherwise do: pop up its own text-selection menu,
+   * and fire a click on release.
+   */
+  function moveButton(label, path, index, step, destination) {
+    var b = document.createElement('button');
+    b.className = 'act';
+    b.title = label + ' (hold to send to the ' + destination + ')';
+    b.setAttribute('aria-label', b.title);
+    b.appendChild(icon(path));
+
+    var timer = null, held = false;
+
+    function start() {
+      held = false;
+      timer = setTimeout(function () {
+        held = true;
+        moveTo(index, step < 0 ? 0 : tasks.length - 1);
+      }, HOLD_MS);
+    }
+    function stop() { clearTimeout(timer); timer = null; }
+
+    b.addEventListener('pointerdown', start);
+    b.addEventListener('pointerup', stop);
+    b.addEventListener('pointercancel', function () { stop(); held = false; });
+    b.addEventListener('pointerleave', function () { stop(); held = false; });
+    b.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+    b.onclick = function () {
+      stop();
+      if (held) { held = false; return; } // the hold already did the work
+      moveTo(index, index + step);
+    };
+    return b;
+  }
+
+  function icon(path) {
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 20 20');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.8');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', path);
+    svg.appendChild(p);
+    return svg;
+  }
+
+  function spacer() {
+    var s = document.createElement('span');
+    s.className = 'act void';
+    return s;
+  }
+
+  function showNote(text) {
+    $('note').textContent = text;
+    $('note').classList.toggle('hidden', !text);
+  }
+
+  function shortDate(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return '';
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  }
+
+
+  /* ================================================================
+   * Editing one task
+   * ================================================================ */
+
+  function beginEdit(li, textEl, task) {
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'text-edit';
+    input.value = task.task;
+    input.maxLength = 500;
+    li.replaceChild(input, textEl);
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    editing = true;
+
+    var closed = false;
+    function finish(save) {
+      if (closed) return;
+      closed = true;
+      editing = false;
+      var value = input.value.trim();
+      li.replaceChild(textEl, input);
+      if (save && value && value !== task.task) rename(task, value);
+    }
+
+    input.onblur = function () { finish(true); };
+    input.onkeydown = function (e) {
+      if (e.key === 'Enter') finish(true);
+      if (e.key === 'Escape') finish(false);
+    };
+  }
+
+
+  /* ================================================================
+   * Changes that go straight to the server
+   *
+   * Each one is applied locally first so the page feels instant, then
+   * sent. The server answers with the whole list, which becomes the new
+   * truth. If the send fails, the local change is rolled back.
+   * ================================================================ */
+
+  function commit(apply, fields) {
+    var snapshot = copy(current());
+    apply();
+    render();
+
+    sending++;
+    $('add').disabled = sending > 0;
+    hideError();
+
+    // Anything sitting in the undo window has to reach the server first, or
+    // its reply would land later and undo what we just did.
+    return flush(true)
+      .then(function () { return api(fields, view === 'archive'); })
+      .then(function (fresh) {
+        setCurrent(fresh);
+        render();
+      })
+      .catch(function (err) {
+        setCurrent(snapshot);
+        render();
+        showError(err.message, null);
+      })
+      .finally(function () {
+        sending--;
+        $('add').disabled = sending > 0;
+      });
+  }
+
+  function current() { return view === 'archive' ? archive : tasks; }
+  function setCurrent(v) { if (view === 'archive') archive = v; else tasks = v; }
+  function copy(arr) { return arr.map(function (t) { return Object.assign({}, t); }); }
+
+  function add() {
+    var input = $('new-task');
+    var text = input.value.trim();
+    if (!text) return;         // empty and whitespace-only are ignored
+    if (sending > 0) return;   // a second tap while the first is in flight
+
+    // The id is made here, not on the server. If this request is somehow
+    // sent twice the server sees the same id and ignores the duplicate.
+    var id = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+    input.value = '';
+    commit(function () {
+      tasks.unshift({ id: id, task: text, completed: false, pending: true });
+    }, { action: 'add', id: id, task: text });
+  }
+
+  function toggle(task, completed) {
+    commit(function () { task.completed = completed; task.pending = true; },
+           { action: 'update', id: task.id, completed: String(completed) });
+  }
+
+  function rename(task, text) {
+    commit(function () { task.task = text; task.pending = true; },
+           { action: 'update', id: task.id, task: text });
+  }
+
+  function restore(task) {
+    commit(function () {
+      archive = archive.filter(function (t) { return t.id !== task.id; });
+    }, { action: 'archive', ids: task.id, archived: 'false' });
+  }
+
+
+  /* ================================================================
+   * Changes you can take back
+   *
+   * Deleting and archiving happen on screen straight away, but the
+   * request is held for a few seconds. Tapping Undo cancels it, so
+   * nothing was ever sent — which is why undo restores the exact
+   * position of a deleted task, not a copy pushed back on top.
+   * ================================================================ */
+
+  function defer(apply, fields, label) {
+    flush(true);                   // only one change waits at a time
+
+    var snapshot = copy(current());
+    apply();
+    render();
+
+    pending = {
+      fields: fields,
+      snapshot: snapshot,
+      inArchive: view === 'archive',
+      timer: setTimeout(flush, UNDO_MS)
+    };
+
+    $('toast-text').textContent = label;
+    $('toast').classList.remove('hidden');
+  }
+
+  /**
+   * Send the waiting change now. Pass true when another change is about to
+   * follow, so this one's reply is not applied over the newer state — the
+   * follower's reply becomes the truth instead.
+   */
+  function flush(quiet) {
+    if (!pending) return Promise.resolve();
+
+    var job = pending;
+    pending = null;
+    clearTimeout(job.timer);
+    $('toast').classList.add('hidden');
+
+    return api(job.fields, job.inArchive)
+      .then(function (fresh) {
+        if (!quiet && job.inArchive === (view === 'archive')) { setCurrent(fresh); render(); }
+      })
+      .catch(function (err) {
+        if (!quiet && job.inArchive === (view === 'archive')) {
+          setCurrent(job.snapshot);
+          render();
+        }
+        showError(err.message, null);
+      });
+  }
+
+  function undo() {
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    setCurrent(pending.snapshot);
+    pending = null;
+    $('toast').classList.add('hidden');
+    render();
+  }
+
+  function remove(task) {
+    var permanent = view === 'archive';
+    defer(function () {
+      setCurrent(current().filter(function (t) { return t.id !== task.id; }));
+    }, { action: 'delete', id: task.id },
+       (permanent ? 'Deleted for good: ' : 'Deleted: ') + task.task);
+  }
+
+  function archiveCompleted() {
+    var done = tasks.filter(function (t) { return t.completed; });
+    if (!done.length) return;
+    var ids = done.map(function (t) { return t.id; });
+
+    defer(function () {
+      tasks = tasks.filter(function (t) { return !t.completed; });
+    }, { action: 'archive', ids: ids.join(','), archived: 'true' },
+       'Archived ' + done.length + (done.length === 1 ? ' task' : ' tasks'));
+  }
+
+
+  /* ================================================================
+   * Reordering
+   *
+   * Arrow taps only rearrange the list in the page. The finished order
+   * goes to the server once, when you tap Done. Sending every tap would
+   * mean a round trip and a full redraw under your finger each time.
+   * ================================================================ */
+
+  function moveTo(from, to) {
+    if (to < 0) to = 0;
+    if (to > tasks.length - 1) to = tasks.length - 1;
+    if (from === to) return;
+
+    var moved = tasks.splice(from, 1)[0];
+    tasks.splice(to, 0, moved);
+    orderDirty = true;
+    render();
+  }
+
+  function setMode(next) {
+    if (next === mode) return;
+    mode = next;
+
+    if (mode === 'normal' && orderDirty) {
+      orderDirty = false;
+      commit(function () {}, {
+        action: 'reorder',
+        order: tasks.map(function (t) { return t.id; }).join(',')
+      });
+    } else {
+      render();
+    }
+  }
+
+
+  /* ================================================================
+   * Loading
+   * ================================================================ */
+
+  function load(wantArchive, quiet) {
+    if (!quiet) showNote('Loading…');
+    hideError();
+
+    return api(null, wantArchive)
+      .then(function (fresh) {
+        if (wantArchive) archive = fresh; else tasks = fresh;
+        render();
+      })
+      .catch(function (err) {
+        showNote('');
+        showError(err.message, function () { load(wantArchive, false); });
+      });
+  }
+
+  function openArchive() {
+    var sent = flush(true);
+    view = 'archive';
+    query = '';
+    $('search').value = '';
+    archive = [];
+    render();
+    showNote('Loading…');
+    sent.then(function () { load(true, false); });
+  }
+
+  function openList() {
+    var sent = flush(true);
+    view = 'list';
+    render();
+    sent.then(function () { load(false, true); });
+  }
+
+
+  /* ================================================================
+   * Errors, setup, wiring
+   * ================================================================ */
+
+  function showError(text, retry) {
+    $('error-text').textContent = text;
+    $('retry').classList.toggle('hidden', !retry);
+    $('retry').onclick = retry || null;
+    $('error').classList.remove('hidden');
+  }
+
+  function hideError() { $('error').classList.add('hidden'); }
+
+  function showSetup() {
+    $('setup').classList.remove('hidden');
+    $('app').classList.add('hidden');
+  }
+
+  function saveUrl() {
+    var value = $('url-input').value.trim();
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(value)) {
+      $('setup-error').textContent =
+        'That does not look right. It should start with https://script.google.com/macros/s/ and end with /exec.';
+      $('setup-error').classList.remove('hidden');
+      return;
+    }
+    endpoint = value;
+    localStorage.setItem(STORAGE_KEY, endpoint);
+    start();
+  }
+
+  function start() {
+    $('setup').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    render();
+    load(false, false);
+  }
+
+  $('add').onclick = add;
+  $('new-task').onkeydown = function (e) { if (e.key === 'Enter') add(); };
+  $('reorder-on').onclick = function () { setMode('reorder'); };
+  $('reorder-off').onclick = function () { setMode('normal'); };
+  $('archive-done').onclick = archiveCompleted;
+  $('go-archive').onclick = openArchive;
+  $('go-list').onclick = openList;
+  $('refresh').onclick = function () { load(false, false); };
+  $('refresh-archive').onclick = function () { load(true, false); };
+  $('undo').onclick = undo;
+  $('url-save').onclick = saveUrl;
+  $('url-input').onkeydown = function (e) { if (e.key === 'Enter') saveUrl(); };
+
+  $('search').oninput = function () {
+    query = $('search').value.trim().toLowerCase();
+    renderArchive();
+  };
+
+  $('reset').onclick = function () {
+    if (!confirm('Forget the server URL on this device? Your tasks stay in the Sheet.')) return;
+    localStorage.removeItem(STORAGE_KEY);
+    location.reload();
+  };
+
+  // Coming back to the app is the moment another device's changes should
+  // appear — but not while you are mid-edit, mid-reorder, or holding an
+  // undo, because a refresh would throw that work away.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden || !endpoint) return;
+    if (editing || mode === 'reorder' || pending || view !== 'list') return;
+    load(false, true);
+  });
+
+  // Closing the tab during the undo window still sends the change.
+  // sendBeacon hands it to the browser to deliver after the page is gone.
+  window.addEventListener('pagehide', function () {
+    if (!pending || !navigator.sendBeacon) return;
+    var body = Object.assign({}, pending.fields);
+    if (pending.inArchive) body.view = 'archive';
+    navigator.sendBeacon(endpoint, new URLSearchParams(body));
+    clearTimeout(pending.timer);
+    pending = null;
+    // The change is gone; do not come back to a stale Undo button.
+    $('toast').classList.add('hidden');
+  });
+
+  if (endpoint) start(); else showSetup();
+
+  // The service worker caches this page and its icons, never the Apps
+  // Script calls, so your tasks are always fetched fresh.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('./sw.js').catch(function () {});
+    });
+  }
+})();
+</script>
+</body>
+</html>
